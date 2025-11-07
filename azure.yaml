@@ -1,0 +1,22 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/Azure/azure-dev/main/schemas/v1.0/azure.yaml.json
+
+name: jellyfin-eastus
+metadata:
+  template: jellyfin-eastus@0.0.1-beta
+
+# Infra configuration
+infra:
+  provider: bicep
+  path: infra
+
+# Services (empty for infrastructure-only deployment)
+services: {}
+
+# Hooks
+hooks:
+  postdeploy:
+    shell: pwsh
+    run: .azd/hooks/postdeploy.ps1 -AZURE_RESOURCE_GROUP ${{AZURE_RESOURCE_GROUP}} -JELLYFIN_ENDPOINT ${{JELLYFIN_ENDPOINT}} -STORAGE_ACCOUNT_NAME ${{STORAGE_ACCOUNT_NAME}}
+  predestroy:
+    shell: pwsh
+    run: .azd/hooks/predestroy.ps1 -AZURE_RESOURCE_GROUP ${{AZURE_RESOURCE_GROUP}} -STORAGE_ACCOUNT_NAME ${{STORAGE_ACCOUNT_NAME}}
