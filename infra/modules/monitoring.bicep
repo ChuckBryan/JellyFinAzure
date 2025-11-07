@@ -4,7 +4,7 @@ param tags object
 
 // Log Analytics Workspace (free tier monitoring)
 resource logAnalyticsWorkspace 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
-  name: 'law-jellyfin-${resourceToken}'
+  name: 'law-jellyfin-${resourceToken}-${uniqueString(resourceGroup().id)}'
   location: location
   tags: tags
   properties: {

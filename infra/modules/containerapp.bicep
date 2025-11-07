@@ -36,13 +36,13 @@ resource jellyfinApp 'Microsoft.App/containerApps@2025-01-01' = {
           name: 'jellyfin'
           env: [
             {
-              name: 'JELLYFIN_PublishedServerUrl'
-              value: 'https://ca-jellyfin-${resourceToken}.${environment().suffixes.storage}'
+              name: 'JELLYFIN_DATA_DIR'
+              value: '/data'
             }
           ]
           resources: {
-            cpu: json('0.5') // Conservative CPU for free tier
-            memory: '1Gi'    // Conservative memory for free tier
+            cpu: json('1')
+            memory: '2Gi'
           }
           volumeMounts: [
             {
@@ -53,11 +53,15 @@ resource jellyfinApp 'Microsoft.App/containerApps@2025-01-01' = {
               volumeName: 'media-volume'
               mountPath: '/media'
             }
+            {
+              volumeName: 'data-volume'
+              mountPath: '/data'
+            }
           ]
         }
       ]
       scale: {
-        minReplicas: 0 // Scale to zero when not in use (cost optimization)
+        minReplicas: 1 // Keep running during setup
         maxReplicas: 1 // Single instance to minimize costs
         rules: [
           {
@@ -80,6 +84,10 @@ resource jellyfinApp 'Microsoft.App/containerApps@2025-01-01' = {
           name: 'media-volume'
           storageType: 'AzureFile'
           storageName: 'media-storage'
+        }
+        {
+          name: 'data-volume'
+          storageType: 'EmptyDir'
         }
       ]
     }
