@@ -39,16 +39,20 @@ resource jellyfinApp 'Microsoft.App/containerApps@2025-01-01' = {
               name: 'JELLYFIN_DATA_DIR'
               value: '/data'
             }
+            {
+              name: 'BACKUP_INTERVAL_SECONDS'
+              value: '14400' // every 4 hours
+            }
+            {
+              name: 'BACKUP_CONTAINER'
+              value: 'jellyfin-backups'
+            }
           ]
           resources: {
             cpu: json('1')
             memory: '2Gi'
           }
           volumeMounts: [
-            {
-              volumeName: 'config-volume'
-              mountPath: '/config'
-            }
             {
               volumeName: 'media-volume'
               mountPath: '/media'
@@ -57,6 +61,50 @@ resource jellyfinApp 'Microsoft.App/containerApps@2025-01-01' = {
               volumeName: 'data-volume'
               mountPath: '/data'
             }
+          ]
+        }
+        // Sidecar container to periodically back up the SQLite DB to Blob Storage
+        {
+          image: 'mcr.microsoft.com/azure-cli'
+          name: 'backup-agent'
+          env: [
+            {
+              name: 'AZURE_STORAGE_ACCOUNT'
+              value: storageAccountName
+            }
+            {
+              name: 'AZURE_STORAGE_KEY'
+              secretRef: 'storage-account-key'
+            }
+            {
+              name: 'BACKUP_CONTAINER'
+              value: 'jellyfin-backups'
+            }
+            {
+              name: 'SOURCE_DB_PATH'
+              value: '/data/data/jellyfin.db'
+            }
+            {
+              name: 'INTERVAL'
+              value: '14400'
+            }
+          ]
+          resources: {
+            cpu: json('0.25')
+            memory: '0.5Gi'
+          }
+          volumeMounts: [
+            {
+              volumeName: 'data-volume'
+              mountPath: '/data'
+            }
+          ]
+          command: [
+            '/bin/bash'
+            '-c'
+          ]
+          args: [
+            'while true; do if [ -f $SOURCE_DB_PATH ]; then TS=$(date +%Y%m%d%H%M%S); cp $SOURCE_DB_PATH /tmp/jellyfin.db && az storage blob upload --container-name $BACKUP_CONTAINER --name jellyfin-$TS.db --file /tmp/jellyfin.db --account-name $AZURE_STORAGE_ACCOUNT --account-key $AZURE_STORAGE_KEY --auth-mode key --content-type application/octet-stream; fi; sleep $INTERVAL; done'
           ]
         }
       ]

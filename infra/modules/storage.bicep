@@ -38,6 +38,14 @@ resource mediaFileShare 'Microsoft.Storage/storageAccounts/fileServices/shares@2
   }
 }
 
+// Blob container for database backups (uploaded by sidecar)
+resource backupBlobContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-01-01' = {
+  name: '${storageAccount.name}/default/jellyfin-backups'
+  properties: {
+    publicAccess: 'None'
+  }
+}
+
 // RBAC for user account (Storage Explorer access)
 resource userStorageRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (!empty(principalId)) {
   scope: storageAccount
@@ -54,3 +62,4 @@ output storageAccountName string = storageAccount.name
 output storageAccountId string = storageAccount.id
 output configShareName string = configFileShare.name
 output mediaShareName string = mediaFileShare.name
+output backupBlobContainerName string = backupBlobContainer.name
