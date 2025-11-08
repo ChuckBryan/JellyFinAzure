@@ -20,11 +20,9 @@ Write-Host ""
 # Storage Explorer setup instructions
 Write-Host "📁 Setting up Azure Storage Explorer for media upload:" -ForegroundColor Yellow
 Write-Host "  1. Download Azure Storage Explorer: https://azure.microsoft.com/features/storage-explorer/"
-Write-Host "  2. Sign in with your Azure account (cbryan@marathonus.com)"
+Write-Host "  2. Sign in with your Azure account"
 Write-Host "  3. Navigate to Storage Accounts > $STORAGE_ACCOUNT_NAME > File Shares"
-Write-Host "  4. Upload media to:"
-Write-Host "     • jellyfin-config: For Jellyfin configuration files"
-Write-Host "     • jellyfin-media: For your movies, TV shows, and music"
+Write-Host "  4. Upload media to the jellyfin-media file share"
 Write-Host ""
 
 # Recommended folder structure
@@ -47,9 +45,17 @@ Write-Host ""
 Write-Host "🚀 Next Steps:" -ForegroundColor Green
 Write-Host "  1. Visit your Jellyfin server: $JELLYFIN_ENDPOINT"
 Write-Host "  2. Complete the initial setup wizard"
-Write-Host "  3. Add media libraries pointing to /media/movies, /media/tv-shows, etc."
-Write-Host "  4. Upload your media using Azure Storage Explorer"
-Write-Host "  5. Enjoy your personal streaming service!"
+Write-Host "  3. Configure SQL Server database connection (automatically configured)"
+Write-Host "  4. Add media libraries pointing to /media/movies, /media/tv-shows, etc."
+Write-Host "  5. Upload your media using Azure Storage Explorer"
+Write-Host "  6. Enjoy your personal streaming service!"
+Write-Host ""
+
+# Database information
+Write-Host "🗄️ Database Setup:" -ForegroundColor Cyan
+Write-Host "  • Jellyfin is configured to use Azure SQL Database"
+Write-Host "  • All configuration and metadata stored in SQL Server"
+Write-Host "  • Automatic backups managed by Azure SQL Database"
 Write-Host ""
 
 # Cost monitoring reminder

@@ -12,7 +12,7 @@
 - [Cleanup](#-cleanup)
 - [Resource Naming Convention](#-resource-naming-convention)
 - [Jellyfin Configuration](#-jellyfin-configuration)
-- [Database Backups](#-database-backups)
+- [Database Management](#-database-management)
 - [Pre-Encode Recommendations](#-pre-encode-recommendations)
 - [Troubleshooting](#-troubleshooting)
 - [Additional Resources](#-additional-resources)
@@ -23,8 +23,9 @@ A cost-optimized Jellyfin media streaming server deployed on Azure using Contain
 ## 🏗️ Architecture
 
 - **Azure Container Apps**: Serverless container hosting with scale-to-zero
-- **Azure Files**: Persistent storage for media; configuration mount is optional and disabled by default to keep the DB local
-- **Managed Identity**: System-assigned identity present; storage mounts/backups currently use the storage account key
+- **Azure SQL Database**: Managed SQL Server database for all Jellyfin data and metadata
+- **Azure Files**: Persistent storage for media files only
+- **Managed Identity**: System-assigned identity for secure Azure resource access
 - **Azure Monitor**: Free tier monitoring and cost alerts
 - **Azure Developer CLI**: Complete lifecycle management
 
@@ -34,11 +35,12 @@ This deployment is designed to maximize Azure's free tier:
 
 - **Container Apps**: 180K vCPU seconds/month free
 - **Azure Files**: 100GB storage free
+- **Azure SQL Database**: Basic tier with 2GB included
 - **Log Analytics**: 5GB logs/month free
 - **Bandwidth**: 100GB outbound/month free
 - **Scale-to-zero**: No charges when not streaming
 
-**Estimated monthly cost**: $0-10 (within free tier limits)
+**Estimated monthly cost**: $5-15 (Azure SQL Database Basic tier ~$5/month)
 
 ## 🚀 Quick Start
 
@@ -70,6 +72,7 @@ This deployment is designed to maximize Azure's free tier:
 During deployment, you'll be prompted for:
 - Environment name (e.g., "dev")
 - Azure location (configured for "eastus")
+- SQL Database administrator password (secure password for database access)
 
 ## 📁 Media Management
 
@@ -99,9 +102,10 @@ jellyfin-media/
 
 ## 🔒 Security Features
 
-- **Managed Identity**: Enabled on the Container App; not used for storage mounting today
-- **Secrets**: Storage account key stored as a Container Apps secret and used by the backup sidecar and Azure Files mounts
-- **RBAC**: Role assignment present for Files SMB, though mounts currently use the account key path
+- **Managed Identity**: Enabled on the Container App for secure Azure resource access
+- **Azure SQL Database**: Encrypted at rest and in transit with managed authentication
+- **Secrets**: Database credentials stored as Container Apps secrets
+- **RBAC**: Role assignments for file share access
 - **HTTPS**: Public HTTP ingress by default; can be enhanced with custom domain + managed certificate
 
 ## 📊 Monitoring & Alerts
@@ -122,13 +126,13 @@ az containerapp update --name <app-name> --resource-group <rg-name> --min-replic
 az containerapp update --name <app-name> --resource-group <rg-name> --min-replicas 1
 ```
 
-### Storage Management
+### Database Management
 ```bash
-# List file shares
-az storage share list --account-name <storage-account> --output table
+# Connect to SQL Database (requires Azure CLI)
+az sql db show-connection-string --server <sql-server-name> --name <database-name>
 
-# Check storage usage
-az storage account show-usage --name <storage-account>
+# Check database size and usage
+az sql db show --resource-group <rg-name> --server <sql-server-name> --name <database-name>
 ```
 
 ### Cost Monitoring
@@ -171,9 +175,10 @@ After deployment:
    - Movies: `/media/movies`
    - TV Shows: `/media/tv-shows`
    - Music: `/media/music`
-4. Configure users and access permissions
-5. Enable SyncPlay for watch-together functionality
-6. Set Published Server URL (Dashboard → Networking): use the Container Apps FQDN shown after deploy, e.g. `https://<your-app>.azurecontainerapps.io`
+4. Configure SQL Server database connection (automatically configured during deployment)
+5. Configure users and access permissions
+6. Enable SyncPlay for watch-together functionality
+7. Set Published Server URL (Dashboard → Networking): use the Container Apps FQDN shown after deploy, e.g. `https://<your-app>.azurecontainerapps.io`
 
 ## 🎉 Watch Party Checklist
 
@@ -184,123 +189,59 @@ After deployment:
 - Test direct play: Confirm a sample title plays without transcoding before inviting others.
 - Cold start: If you need instant start, keep `minReplicas: 1` before the event; otherwise expect a brief cold start when scaled to zero.
 
-## 🔄 Database Backups
+## �️ Database Management
 
-SQLite is stored on an ephemeral local volume (`EmptyDir` mounted at `/data`) for reliability. A sidecar container periodically backs up the database to Azure Blob Storage.
+Jellyfin is configured to use Azure SQL Database for all data storage including configuration, user data, libraries, and metadata.
 
-### What Is Backed Up
-- **Entire data directory**: `/data/data/` (all files copied individually)
-- **Includes:**
-  - `jellyfin.db` - Main SQLite database file
-  - `jellyfin.db-wal` - Write-Ahead Log (contains recent changes)
-  - `jellyfin.db-shm` - Shared memory file
-  - `playlists/`, `ScheduledTasks/`, `device.txt`, and all configuration
-- **Destination**: Blob container `jellyfin-backups`
-- **Folder pattern**: `backup-YYYYMMDDHHMMSS/` (UTC)
-- **Media NOT included** (media lives on the Azure Files share mounted at `/media`).
+### Database Features
+- **Automatic Backups**: Azure SQL Database automatically creates backups
+  - Point-in-time restore for up to 7 days (Basic tier)
+  - Geo-redundant backups for disaster recovery
+- **High Availability**: Built-in redundancy and failover
+- **Encryption**: Data encrypted at rest and in transit
+- **Scaling**: Can upgrade database tier as needed
 
-### How It Works
-**Init container** (`restore-db`):
-- Runs before Jellyfin starts.
-- Queries blob container for the latest backup folder (sorted by last modified).
-- If found, downloads all files from `backup-YYYYMMDDHHMMSS/` to `/data/data/`.
-- If none exists, Jellyfin starts fresh.
+### Database Connection
+Jellyfin connects to SQL Server using these environment variables:
+- `JELLYFIN_DB_TYPE=SqlServer`
+- `JELLYFIN_DB_SERVER`: SQL Server FQDN
+- `JELLYFIN_DB_DATABASE`: Database name
+- `JELLYFIN_DB_USER`: Admin username
+- `JELLYFIN_DB_PASSWORD`: Admin password (from secrets)
 
-**Sidecar** (`backup-agent`):
-- Runs alongside Jellyfin continuously.
-- Loop every `INTERVAL` seconds (default 14400 = 4h).
-- Checks for `/data/data` directory.
-- Uses `az storage blob upload-batch` to upload all files to a timestamped folder.
+### Backup and Recovery
+**Automatic Backups:**
+- Azure SQL Database handles all backups automatically
+- No manual backup scripts needed
+- Point-in-time restore available through Azure Portal
 
-Key environment values (from `infra/modules/containerapp.bicep`):
-```
-JELLYFIN_DATA_DIR=/data
-BACKUP_CONTAINER=jellyfin-backups
-INTERVAL=14400
-```
-
-### Verify Backups
-```powershell
-$acct = "<storage-account-name>"
-$rg   = "<resource-group>"
-$key  = (az storage account keys list -n $acct -g $rg --query [0].value -o tsv)
-az storage blob list --container-name jellyfin-backups --account-name $acct --account-key $key --prefix "backup-" -o table
-```
-Expect folders like `backup-YYYYMMDDHHMMSS/` containing all database files.
-
-### Manual One-Off Backup
-The backup script can check for new backups or you can manually trigger one:
-```powershell
-# Option 1: Use the script (checks for new backups)
-.\scripts\backup-now.ps1
-
-# Option 2: Restart the app (triggers backup on startup)
-az containerapp revision restart -n <containerapp-name> -g <rg> --revision <active-revision-name>
+**Manual Backup (if needed):**
+```bash
+# Export database to bacpac file
+az sql db export --resource-group <rg-name> --server <server-name> --name <db-name> \
+  --admin-user <admin-user> --admin-password <password> \
+  --storage-key <storage-key> --storage-key-type StorageAccessKey \
+  --storage-uri "https://<storage-account>.blob.core.windows.net/<container>/backup.bacpac"
 ```
 
-### Restore Procedure
-**Automatic restore (recommended):**
-- The init container automatically restores the latest backup on every cold start.
-- Just deploy the updated infrastructure with `azd provision` and restart or wait for scale-to-zero.
+**Restore Database:**
+- Use Azure Portal → SQL Database → Restore
+- Choose point-in-time or restore from backup file
+- Can restore to new database if needed
 
-**Manual restore (if needed):**
-1. List available backups:
-   ```powershell
-   .\scripts\list-backups.ps1
-   ```
-2. Use the restore script:
-   ```powershell
-   # Restore latest backup
-   .\scripts\restore-backup.ps1 -Latest
-   
-   # Or choose interactively
-   .\scripts\restore-backup.ps1
-   ```
-3. The script will download the tar.gz, extract it, and restart the app.
+### Database Monitoring
+```bash
+# Check database status
+az sql db show --resource-group <rg-name> --server <server-name> --name <db-name>
 
-### Adjust Backup Frequency
-Change `INTERVAL` env for `backup-agent` in `infra/modules/containerapp.bicep`, then:
-```powershell
-azd provision
+# View database metrics
+az monitor metrics list --resource <database-resource-id> --metric "dtu_consumption_percent"
 ```
 
-### Retention
-- Keep last 30–60 backups.
-- Optionally enable Storage Lifecycle Management (delete blobs older than X days).
-
-### Backup vs. Scale-to-Zero Trade‑off
-- With `minReplicas: 1` (default here): one replica always runs, and the backup sidecar runs on schedule. This costs a small, continuous amount but guarantees periodic backups.
-- With `minReplicas: 0`: the app scales to zero when idle, reducing compute cost to near-zero. However, no replicas means no sidecar and therefore no backups while idle. Backups only occur when the app is scaled up (e.g., after a request).
-
-Recommended:
-- Keep `minReplicas: 1` during initial setup and periods when you want guaranteed backups.
-- If minimizing cost is more important, set `minReplicas: 0` and accept that backups will only run when the app is active.
-
-Commands to toggle:
-```powershell
-# Allow scale-to-zero
-az containerapp update -n <containerapp-name> -g <rg> --min-replicas 0
-
-# Keep always-on backups
-az containerapp update -n <containerapp-name> -g <rg> --min-replicas 1
-```
-
-### Security
-- Uses storage account key in a Container Apps secret.
-- Managed identity currently not used for blob ops (could migrate to SAS + MI later).
-- Rotate storage account key periodically.
-
-### Troubleshooting Backups
-```powershell
-az containerapp logs show -n <containerapp-name> -g <rg> --container backup-agent --tail 100
-```
-Check:
-- Blob container exists.
-- DB file path present: `az containerapp exec ... --container jellyfin --command "bash" -- -lc "ls -l /data/data"`.
-- Correct storage account name/key.
-
-### Why Not Put DB on Azure Files?
-SQLite over SMB encounters locking & migration failures. `EmptyDir` avoids that; backups mitigate ephemerality.
+### Cost Management
+- **Basic Tier**: ~$5/month for 2GB database
+- **Upgrade**: Can scale to Standard/Premium tiers as needed
+- **Monitor**: Use Azure Cost Management to track database costs
 
 ## 🎞️ Pre-Encode Recommendations
 

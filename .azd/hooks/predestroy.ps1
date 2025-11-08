@@ -11,8 +11,8 @@ Write-Host ""
 
 # Warn about data loss
 Write-Host "⚠️ WARNING: This will permanently delete:" -ForegroundColor Red
-Write-Host "  • All Jellyfin configuration"
-Write-Host "  • All uploaded media files"
+Write-Host "  • SQL Server database (all Jellyfin configuration and metadata)"
+Write-Host "  • All uploaded media files in Azure Storage"
 Write-Host "  • All monitoring data"
 Write-Host "  • The entire resource group: $AZURE_RESOURCE_GROUP"
 Write-Host ""
@@ -20,8 +20,8 @@ Write-Host ""
 # Backup reminder
 Write-Host "💾 Backup Reminder:" -ForegroundColor Cyan
 Write-Host "  • Download important media from Azure Storage Explorer"
-Write-Host "  • Export Jellyfin configuration if needed"
-Write-Host "  • Save any custom settings or user data"
+Write-Host "  • Export SQL Server database if you want to preserve configuration"
+Write-Host "  • Azure SQL Database automatic backups will also be deleted"
 Write-Host ""
 
 # Cost savings note

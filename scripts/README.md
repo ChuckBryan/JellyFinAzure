@@ -1,65 +1,20 @@
 # Jellyfin Azure - Management Scripts
 
-Quick PowerShell scripts for common Jellyfin database backup operations.
+This folder previously contained backup management scripts for the JellyRoller backup system. 
 
-## Prerequisites
+Since the setup has been migrated to use SQL Server for data storage, the backup scripts have been removed as they are no longer needed.
 
-- Azure CLI installed and authenticated (`az login`)
-- PowerShell 7+ recommended (works with Windows PowerShell 5.1)
+## Current Setup
 
-## Scripts
+The Jellyfin deployment now uses:
+- **SQL Server Database** for all data storage (metadata, user data, configurations)
+- **Azure File Share** for media files only
+- **No backup automation** - SQL Server provides its own backup and recovery mechanisms
 
-### `list-backups.ps1`
-List all database backups in blob storage.
+## Managing Your Setup
 
-```powershell
-# List last 20 backups (default)
-.\scripts\list-backups.ps1
+- **SQL Database**: Use Azure SQL Database backup features through Azure Portal
+- **Media Files**: Managed through Azure Storage Explorer
+- **Configuration**: Stored in SQL Server database, backed up automatically by Azure SQL
 
-# List last 50 backups
-.\scripts\list-backups.ps1 -Last 50
-```
-
-### `backup-now.ps1`
-Trigger an immediate backup of the current database.
-
-```powershell
-# Create a backup now
-.\scripts\backup-now.ps1
-```
-
-### `restore-backup.ps1`
-Restore a database backup from blob storage.
-
-```powershell
-# Interactive: select from list
-.\scripts\restore-backup.ps1
-
-# Restore latest backup automatically
-.\scripts\restore-backup.ps1 -Latest
-
-# Restore specific backup
-.\scripts\restore-backup.ps1 -BlobName "jellyfin-20251107234345.tar.gz"
-```
-
-## Default Values
-
-All scripts use these defaults (can be overridden with parameters):
-- Container App: `ca-jellyfin-uopr4dp2rx5jg`
-- Resource Group: `rg-jellyfin-eastus-uopr4dp2rx5jg`
-- Storage Account: `stjellyfinuopr4dp2rx5jg`
-
-Override example:
-```powershell
-.\scripts\backup-now.ps1 -ContainerAppName "my-app" -ResourceGroup "my-rg"
-```
-
-## Notes
-
-- Backups are stored in the `jellyfin-backups` blob container
-- **Backup format:** `backup-YYYYMMDDHHMMSS/` (folder with all files)
-- **Contents:** Entire `/data/data/` directory including:
-  - `jellyfin.db`, `jellyfin.db-wal`, `jellyfin.db-shm` (SQLite files with WAL)
-  - All configuration, playlists, scheduled tasks, device info
-- Restore operations will restart the container app automatically
-- The init container automatically restores the latest backup on every cold start
+For any database operations, use the Azure Portal SQL Database management tools or Azure CLI commands specific to SQL databases.

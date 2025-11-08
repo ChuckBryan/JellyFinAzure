@@ -3,9 +3,6 @@ param resourceToken string
 param tags object
 param containerAppsEnvironmentId string
 param storageAccountName string
-param enableJellyRoller bool = false
-param jellyRollerImage string = ''
-param jellyfinApiKey string = ''
 param sqlServerFqdn string
 param sqlDatabaseName string
 param sqlAdminLogin string
@@ -30,24 +27,19 @@ resource jellyfinApp 'Microsoft.App/containerApps@2025-01-01' = {
         transport: 'http'
         allowInsecure: true // HTTPS can be added later via custom domain
       }
-      secrets: concat([
+      secrets: [
         {
           name: 'storage-account-key'
           value: storageAccount.listKeys().keys[0].value
         }
         {
-          name: 'sql-connection-string'
-          value: 'Server=tcp:${sqlServerFqdn},1433;Initial Catalog=${sqlDatabaseName};Persist Security Info=False;User ID=${sqlAdminLogin};Password=${sqlAdminPassword};MultipleActiveResultSets=False;Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;'
+          name: 'sql-admin-password'
+          value: sqlAdminPassword
         }
-      ], enableJellyRoller && !empty(jellyfinApiKey) ? [
-        {
-          name: 'jellyfin-api-key'
-          value: jellyfinApiKey
-        }
-      ] : [])
+      ]
     }
     template: {
-      containers: concat([
+      containers: [
         {
           image: 'jellyfin/jellyfin:latest'
           name: 'jellyfin'
@@ -57,8 +49,24 @@ resource jellyfinApp 'Microsoft.App/containerApps@2025-01-01' = {
               value: '/data'
             }
             {
-              name: 'ConnectionStrings__DefaultConnection'
-              secretRef: 'sql-connection-string'
+              name: 'JELLYFIN_DB_TYPE'
+              value: 'SqlServer'
+            }
+            {
+              name: 'JELLYFIN_DB_SERVER'
+              value: sqlServerFqdn
+            }
+            {
+              name: 'JELLYFIN_DB_DATABASE'
+              value: sqlDatabaseName
+            }
+            {
+              name: 'JELLYFIN_DB_USER'
+              value: sqlAdminLogin
+            }
+            {
+              name: 'JELLYFIN_DB_PASSWORD'
+              secretRef: 'sql-admin-password'
             }
           ]
           resources: {
@@ -76,85 +84,7 @@ resource jellyfinApp 'Microsoft.App/containerApps@2025-01-01' = {
             }
           ]
         }
-      ], enableJellyRoller && !empty(jellyRollerImage) ? [
-        // JellyRoller API-driven backup sidecar (spike)
-        {
-          image: jellyRollerImage
-          name: 'jellyroller-runner'
-          env: [
-            {
-              name: 'JELLYFIN_URL'
-              value: 'http://localhost:8096'
-            }
-            {
-              name: 'JELLYFIN_API_KEY'
-              secretRef: 'jellyfin-api-key'
-            }
-            {
-              name: 'AZURE_STORAGE_ACCOUNT'
-              value: storageAccountName
-            }
-            {
-              name: 'AZURE_STORAGE_KEY'
-              secretRef: 'storage-account-key'
-            }
-            {
-              name: 'BLOB_CONTAINER'
-              value: 'jellyfin-backups'
-            }
-            {
-              name: 'JELLYROLLER_ENABLED'
-              value: 'true'
-            }
-            {
-              name: 'BACKUP_INTERVAL_SECONDS'
-              value: '14400'
-            }
-            {
-              name: 'STARTUP_DELAY_SECONDS'
-              value: '60'
-            }
-            {
-              name: 'MIN_BACKUP_SIZE_BYTES'
-              value: '1000000'
-            }
-            {
-              name: 'RETENTION_KEEP'
-              value: '30'
-            }
-            {
-              name: 'RETRY_MAX'
-              value: '5'
-            }
-            {
-              name: 'RETRY_BACKOFF_SECONDS'
-              value: '15'
-            }
-          ]
-          resources: {
-            cpu: json('0.25')
-            memory: '0.5Gi'
-          }
-          volumeMounts: [
-            {
-              volumeName: 'data-volume'
-              mountPath: '/data'
-            }
-            {
-              volumeName: 'backups-volume'
-              mountPath: '/data/backups'
-            }
-            {
-              volumeName: 'backups-volume'
-              mountPath: '/data/data/backups'
-            }
-            {
-              volumeName: 'jellyroller-config'
-              mountPath: '/home/app/.config/jellyroller'
-            }
-          ]
-        }
-      ] : [])
+      ]
       scale: {
         minReplicas: 0 // Allow scale-to-zero when idle
         maxReplicas: 1 // Single instance to minimize costs
@@ -169,7 +99,7 @@ resource jellyfinApp 'Microsoft.App/containerApps@2025-01-01' = {
           }
         ]
       }
-      volumes: concat([
+      volumes: [
         {
           name: 'media-volume'
           storageType: 'AzureFile'
@@ -179,12 +109,7 @@ resource jellyfinApp 'Microsoft.App/containerApps@2025-01-01' = {
           name: 'data-volume'
           storageType: 'EmptyDir'
         }
-      ], enableJellyRoller ? [
-        {
-          name: 'jellyroller-config'
-          storageType: 'EmptyDir'
-        }
-      ] : [])
+      ]
     }
   }
 }
@@ -217,9 +142,6 @@ resource managedIdentityStorageRoleAssignment 'Microsoft.Authorization/roleAssig
     principalId: jellyfinApp.identity.principalId
     principalType: 'ServicePrincipal'
   }
-  dependsOn: [
-    jellyfinApp
-  ]
 }
 
 // Reference to Storage Account

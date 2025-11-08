@@ -13,16 +13,6 @@ param environmentName string
 @description('Unique identifier for the deployment')
 param principalId string = ''
 
-@description('Enable JellyRoller API-driven backup sidecar (spike)')
-param enableJellyRoller bool = false
-
-@description('JellyRoller container image (e.g., ghcr.io/yourorg/jellyroller-runner:latest)')
-param jellyRollerImage string = ''
-
-@description('Jellyfin API key for JellyRoller authentication')
-@secure()
-param jellyfinApiKey string = ''
-
 @description('SQL Database administrator password')
 @secure()
 param sqlAdminPassword string
@@ -87,9 +77,6 @@ module jellyfinApp 'modules/containerapp.bicep' = {
     tags: tags
     containerAppsEnvironmentId: containerAppsEnvironment.outputs.environmentId
     storageAccountName: storage.outputs.storageAccountName
-    enableJellyRoller: enableJellyRoller
-    jellyRollerImage: jellyRollerImage
-    jellyfinApiKey: jellyfinApiKey
     sqlServerFqdn: database.outputs.serverFqdn
     sqlDatabaseName: database.outputs.databaseName
     sqlAdminLogin: database.outputs.administratorLogin
