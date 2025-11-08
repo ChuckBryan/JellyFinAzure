@@ -189,28 +189,32 @@ After deployment:
 SQLite is stored on an ephemeral local volume (`EmptyDir` mounted at `/data`) for reliability. A sidecar container periodically backs up the database to Azure Blob Storage.
 
 ### What Is Backed Up
-- Source file: `/data/data/jellyfin.db`
-- Destination: Blob container `jellyfin-backups`
-- Filename pattern: `jellyfin-YYYYMMDDHHMMSS.db` (UTC)
-- Media NOT included (media lives on the Azure Files share mounted at `/media`).
+- **Entire data directory**: `/data/data/` (all files copied individually)
+- **Includes:**
+  - `jellyfin.db` - Main SQLite database file
+  - `jellyfin.db-wal` - Write-Ahead Log (contains recent changes)
+  - `jellyfin.db-shm` - Shared memory file
+  - `playlists/`, `ScheduledTasks/`, `device.txt`, and all configuration
+- **Destination**: Blob container `jellyfin-backups`
+- **Folder pattern**: `backup-YYYYMMDDHHMMSS/` (UTC)
+- **Media NOT included** (media lives on the Azure Files share mounted at `/media`).
 
 ### How It Works
 **Init container** (`restore-db`):
 - Runs before Jellyfin starts.
-- Queries blob container for the latest backup (sorted by last modified).
-- If found, downloads it to `/data/data/jellyfin.db`.
+- Queries blob container for the latest backup folder (sorted by last modified).
+- If found, downloads all files from `backup-YYYYMMDDHHMMSS/` to `/data/data/`.
 - If none exists, Jellyfin starts fresh.
 
 **Sidecar** (`backup-agent`):
 - Runs alongside Jellyfin continuously.
 - Loop every `INTERVAL` seconds (default 14400 = 4h).
-- Checks for `SOURCE_DB_PATH` (`/data/data/jellyfin.db`).
-- Copies to `/tmp/jellyfin.db` and uploads with `az storage blob upload` using the storage account key secret.
+- Checks for `/data/data` directory.
+- Uses `az storage blob upload-batch` to upload all files to a timestamped folder.
 
 Key environment values (from `infra/modules/containerapp.bicep`):
 ```
 JELLYFIN_DATA_DIR=/data
-SOURCE_DB_PATH=/data/data/jellyfin.db
 BACKUP_CONTAINER=jellyfin-backups
 INTERVAL=14400
 ```
@@ -220,29 +224,39 @@ INTERVAL=14400
 $acct = "<storage-account-name>"
 $rg   = "<resource-group>"
 $key  = (az storage account keys list -n $acct -g $rg --query [0].value -o tsv)
-az storage blob list --container-name jellyfin-backups --account-name $acct --account-key $key -o table
+az storage blob list --container-name jellyfin-backups --account-name $acct --account-key $key --prefix "backup-" -o table
 ```
-Expect entries like `jellyfin-YYYYMMDDHHMMSS.db`.
+Expect folders like `backup-YYYYMMDDHHMMSS/` containing all database files.
 
 ### Manual One-Off Backup
+The backup script can check for new backups or you can manually trigger one:
 ```powershell
-az containerapp exec -n <containerapp-name> -g <rg> --container backup-agent --command "bash" -- -lc "TS=$(date +%Y%m%d%H%M%S); cp /data/data/jellyfin.db /tmp/jellyfin.db && az storage blob upload --container-name $BACKUP_CONTAINER --name jellyfin-$TS.db --file /tmp/jellyfin.db --account-name $AZURE_STORAGE_ACCOUNT --account-key $AZURE_STORAGE_KEY --auth-mode key --content-type application/octet-stream"
+# Option 1: Use the script (checks for new backups)
+.\scripts\backup-now.ps1
+
+# Option 2: Restart the app (triggers backup on startup)
+az containerapp revision restart -n <containerapp-name> -g <rg> --revision <active-revision-name>
 ```
 
 ### Restore Procedure
+**Automatic restore (recommended):**
+- The init container automatically restores the latest backup on every cold start.
+- Just deploy the updated infrastructure with `azd provision` and restart or wait for scale-to-zero.
+
+**Manual restore (if needed):**
 1. List available backups:
    ```powershell
-   az storage blob list --container-name jellyfin-backups --account-name $acct --account-key $key -o table
+   .\scripts\list-backups.ps1
    ```
-2. Download chosen blob into `/data` (overwrites current DB):
+2. Use the restore script:
    ```powershell
-   az containerapp exec -n <containerapp-name> -g <rg> --container backup-agent --command "bash" -- -lc "az storage blob download --container-name jellyfin-backups --name <blob-name> --file /data/data/jellyfin.db --account-name $AZURE_STORAGE_ACCOUNT --account-key $AZURE_STORAGE_KEY --auth-mode key --overwrite"
+   # Restore latest backup
+   .\scripts\restore-backup.ps1 -Latest
+   
+   # Or choose interactively
+   .\scripts\restore-backup.ps1
    ```
-3. Restart active revision (recommended):
-   ```powershell
-   az containerapp revision list -n <containerapp-name> -g <rg> -o table
-   az containerapp revision restart -n <containerapp-name> -g <rg> --revision <active-revision-name>
-   ```
+3. The script will download the tar.gz, extract it, and restart the app.
 
 ### Adjust Backup Frequency
 Change `INTERVAL` env for `backup-agent` in `infra/modules/containerapp.bicep`, then:

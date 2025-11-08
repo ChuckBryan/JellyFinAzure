@@ -47,10 +47,7 @@ resource jellyfinApp 'Microsoft.App/containerApps@2025-01-01' = {
               name: 'BACKUP_CONTAINER'
               value: 'jellyfin-backups'
             }
-            {
-              name: 'RESTORE_PATH'
-              value: '/data/data/jellyfin.db'
-            }
+
           ]
           resources: {
             cpu: json('0.25')
@@ -67,7 +64,7 @@ resource jellyfinApp 'Microsoft.App/containerApps@2025-01-01' = {
             '-c'
           ]
           args: [
-            'LATEST=$(az storage blob list --container-name $BACKUP_CONTAINER --account-name $AZURE_STORAGE_ACCOUNT --account-key $AZURE_STORAGE_KEY --auth-mode key --query "sort_by([?name!=\'\'], &properties.lastModified)[-1].name" -o tsv); if [ -n "$LATEST" ]; then echo "Restoring $LATEST..."; mkdir -p $(dirname $RESTORE_PATH); az storage blob download --container-name $BACKUP_CONTAINER --name "$LATEST" --file $RESTORE_PATH --account-name $AZURE_STORAGE_ACCOUNT --account-key $AZURE_STORAGE_KEY --auth-mode key --overwrite && echo "Restore complete."; else echo "No backups found; starting fresh."; fi'
+            'LATEST=$(az storage blob list --container-name $BACKUP_CONTAINER --account-name $AZURE_STORAGE_ACCOUNT --account-key $AZURE_STORAGE_KEY --auth-mode key --prefix "backup-" --query "sort_by([?name!=\'\'], &properties.lastModified)[-1].name" -o tsv); if [ -n "$LATEST" ]; then BACKUP_DIR=$(echo $LATEST | cut -d/ -f1); echo "Restoring from $BACKUP_DIR..."; mkdir -p /data/data; find /data/data -maxdepth 1 -type d -name "backup-*" -exec rm -rf {} +; az storage blob download-batch --source $BACKUP_CONTAINER --destination /data/data --account-name $AZURE_STORAGE_ACCOUNT --account-key $AZURE_STORAGE_KEY --pattern "$BACKUP_DIR/*" --auth-mode key && echo "Files downloaded. Checking structure..."; ls -la /data/data/; if [ -d "/data/data/$BACKUP_DIR" ]; then echo "Moving files out of nested directory..."; mv /data/data/$BACKUP_DIR/* /data/data/ && rmdir /data/data/$BACKUP_DIR && echo "Restore complete."; else echo "Files already in correct location. Restore complete."; fi; else echo "No backups found; starting fresh."; fi'
           ]
         }
       ]
@@ -121,10 +118,7 @@ resource jellyfinApp 'Microsoft.App/containerApps@2025-01-01' = {
               name: 'BACKUP_CONTAINER'
               value: 'jellyfin-backups'
             }
-            {
-              name: 'SOURCE_DB_PATH'
-              value: '/data/data/jellyfin.db'
-            }
+
             {
               name: 'INTERVAL'
               value: '14400'
@@ -145,7 +139,7 @@ resource jellyfinApp 'Microsoft.App/containerApps@2025-01-01' = {
             '-c'
           ]
           args: [
-            'while true; do if [ -f $SOURCE_DB_PATH ]; then TS=$(date +%Y%m%d%H%M%S); cp $SOURCE_DB_PATH /tmp/jellyfin.db && az storage blob upload --container-name $BACKUP_CONTAINER --name jellyfin-$TS.db --file /tmp/jellyfin.db --account-name $AZURE_STORAGE_ACCOUNT --account-key $AZURE_STORAGE_KEY --auth-mode key --content-type application/octet-stream; fi; sleep $INTERVAL; done'
+            'while true; do if [ -d /data/data ]; then TS=$(date +%Y%m%d%H%M%S); BACKUP_PATH="backup-$TS"; echo "Starting backup to $BACKUP_PATH..."; find /data/data -maxdepth 1 -type d -name "backup-*" -exec rm -rf {} +; az storage blob upload-batch --source /data/data --destination $BACKUP_CONTAINER --destination-path "$BACKUP_PATH" --account-name $AZURE_STORAGE_ACCOUNT --account-key $AZURE_STORAGE_KEY --auth-mode key --overwrite && echo "Backup $TS complete"; fi; sleep $INTERVAL; done'
           ]
         }
       ]

@@ -39,7 +39,7 @@ Restore a database backup from blob storage.
 .\scripts\restore-backup.ps1 -Latest
 
 # Restore specific backup
-.\scripts\restore-backup.ps1 -BlobName "jellyfin-20251107234345.db"
+.\scripts\restore-backup.ps1 -BlobName "jellyfin-20251107234345.tar.gz"
 ```
 
 ## Default Values
@@ -57,6 +57,9 @@ Override example:
 ## Notes
 
 - Backups are stored in the `jellyfin-backups` blob container
-- Backup naming: `jellyfin-YYYYMMDDHHMMSS.db` (UTC timestamp)
+- **Backup format:** `backup-YYYYMMDDHHMMSS/` (folder with all files)
+- **Contents:** Entire `/data/data/` directory including:
+  - `jellyfin.db`, `jellyfin.db-wal`, `jellyfin.db-shm` (SQLite files with WAL)
+  - All configuration, playlists, scheduled tasks, device info
 - Restore operations will restart the container app automatically
-- The init container restores the latest backup on every cold start
+- The init container automatically restores the latest backup on every cold start
