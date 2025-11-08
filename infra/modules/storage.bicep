@@ -21,28 +21,12 @@ resource storageAccount 'Microsoft.Storage/storageAccounts@2023-01-01' = {
   }
 }
 
-// File Shares for Jellyfin
-resource configFileShare 'Microsoft.Storage/storageAccounts/fileServices/shares@2023-01-01' = {
-  name: '${storageAccount.name}/default/jellyfin-config'
-  properties: {
-    shareQuota: 10 // 10GB for config - well within free tier
-    enabledProtocols: 'SMB'
-  }
-}
-
+// File Share for Media only
 resource mediaFileShare 'Microsoft.Storage/storageAccounts/fileServices/shares@2023-01-01' = {
   name: '${storageAccount.name}/default/jellyfin-media'
   properties: {
-    shareQuota: 90 // 90GB for media - stays within 100GB free tier
+    shareQuota: 100 // 100GB for media - use full free tier allowance
     enabledProtocols: 'SMB'
-  }
-}
-
-// Blob container for database backups (uploaded by sidecar)
-resource backupBlobContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-01-01' = {
-  name: '${storageAccount.name}/default/jellyfin-backups'
-  properties: {
-    publicAccess: 'None'
   }
 }
 
@@ -60,6 +44,4 @@ resource userStorageRoleAssignment 'Microsoft.Authorization/roleAssignments@2022
 // Outputs
 output storageAccountName string = storageAccount.name
 output storageAccountId string = storageAccount.id
-output configShareName string = configFileShare.name
 output mediaShareName string = mediaFileShare.name
-output backupBlobContainerName string = backupBlobContainer.name

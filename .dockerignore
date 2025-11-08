@@ -1,0 +1,10 @@
+.git
+.azure
+.azd
+.vscode
+*.md
+!README.md
+Thoughts.txt
+infra/
+scripts/
+azure.yaml
