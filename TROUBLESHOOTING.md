@@ -441,3 +441,90 @@ User may accept current limitation: First restart after configuration still prom
 - SQLite on Network Filesystems: https://www.sqlite.org/faq.html#q5
 - Azure Container Apps EmptyDir: https://learn.microsoft.com/en-us/azure/container-apps/storage-mounts
 - SQLite WAL Mode: https://www.sqlite.org/wal.html
+
+## Spike: JellyRoller API-Driven Backups (Optional Sidecar)
+
+### Goal
+Evaluate JellyRoller (Rust CLI) to trigger Jellyfin's built-in backup API as an optional sidecar, without removing the current tar-based sidecar. Aim to improve backup consistency and eliminate the “tiny first archive” timing issue.
+
+### Why Try This
+- Current tar sidecar can run too early, producing trivial archives.
+- JellyRoller leverages Jellyfin's own backup engine (`create-backup`), which bundles database/metadata/trickplay/subtitles and exposes them via `get-backups` for retrieval.
+- We keep the existing tar approach as fallback; this is a safe, reversible spike.
+
+### Architecture (Spike)
+- Add a new optional sidecar container `jellyroller-runner` to the Container App.
+- Reuse `EmptyDir` data volume mounted at `/data`; configure Jellyfin's backup output to `/data/backups` so the sidecar can read completed archives.
+- Upload completed archives to the existing Blob container under a separate prefix (e.g., `jellyroller/`).
+
+### Image Plan (High-Level)
+- Create `Dockerfile.jellyroller` that:
+  - Installs JellyRoller binary and AzCopy (or Azure CLI) with CA certs.
+  - Runs as non-root; home at `/home/app`.
+  - Provides a tiny entry script: startup delay → API health check → create-backup → poll for file → size/hash → upload → retention → sleep.
+- Publish image to ACR or GHCR with immutable tags; reference immutable tag in infra.
+
+### Configuration
+- Secrets/Env
+  - `JELLYFIN_URL` (e.g., `http://localhost:8096` within the app network).
+  - Prefer `JELLYFIN_API_KEY` as a secret; avoid interactive init. Optionally support one-time `initialize` using `JELLYFIN_ADMIN_USER`/`JELLYFIN_ADMIN_PASSWORD` (secrets) to mint an API key.
+  - Storage: `AZURE_STORAGE_ACCOUNT` (value), `AZURE_STORAGE_KEY` (secret), `BLOB_CONTAINER=jellyfin-backups`.
+  - Control: `JELLYROLLER_ENABLED=true`, `BACKUP_INTERVAL_SECONDS=14400`, `STARTUP_DELAY_SECONDS=60`, `MIN_BACKUP_SIZE_BYTES=1000000`, `RETENTION_KEEP=30`, `RETRY_MAX=5`, `RETRY_BACKOFF_SECONDS=15`.
+- Volumes & Paths
+  - Ensure Jellyfin writes backups to `/data/backups` (Dashboard → Paths).
+  - Mount `data-volume` at `/data` in the runner (read `/data/backups`).
+  - If using `initialize`, mount `jellyroller-config` (`EmptyDir`) at `/home/app/.config/jellyroller`.
+
+### Backup Flow (Sidecar Loop)
+1. Delay `STARTUP_DELAY_SECONDS` and verify `GET /System/Info/Public` on `JELLYFIN_URL`.
+2. Run `create-backup` via JellyRoller.
+3. Poll `get-backups` to identify the new backup and confirm the archive appears at `/data/backups/<archive>`.
+4. Confirm file size is stable across two reads and ≥ `MIN_BACKUP_SIZE_BYTES`.
+5. Compute SHA256 of the archive.
+6. Upload to Blob under `jellyroller/backup-<UTC-YYYYMMDDHHMMSS>.zip` (or server-provided extension).
+7. Set Blob metadata: `source=jellyroller`, `size`, `sha256`, `jellyfin_version`, `timestamp_utc`.
+8. Retention: keep latest `RETENTION_KEEP` under `jellyroller/`, delete oldest after a successful new upload.
+9. Sleep for `BACKUP_INTERVAL_SECONDS` and repeat.
+
+### Restore Flow (Spike Test)
+1. Select a JellyRoller-produced blob with valid metadata and size.
+2. Download it to `/data/backups/` (runner or one-off ACA job).
+3. Run `apply-backup --filename <archive>` with JellyRoller against `JELLYFIN_URL`.
+4. Restart Jellyfin if the API does not automatically; verify login screen (no setup wizard) and expected users/libraries.
+
+### Guardrails
+- Gate with `JELLYROLLER_ENABLED` to avoid double-running alongside the tar sidecar.
+- Delay first backup; enforce a minimum archive size; retry with backoff on transient errors.
+- Ensure single-flight execution (skip if a run is already in progress).
+- Only prune older backups after a successful upload and validation.
+
+### Observability
+- Log start/end, archive name, size, sha256, upload URL (no secrets), retention actions, and elapsed durations.
+- Emit a health line: `last_backup_utc=<iso8601> size_bytes=<n>` for quick grepping.
+- Inspect via `az containerapp logs show --container jellyroller-runner --type console --follow`.
+
+### Acceptance Criteria
+- Backup archive on disk ≥ `MIN_BACKUP_SIZE_BYTES` and mirrored to Blob with metadata.
+- `get-backups` lists the backup; archive is retrievable and hash-verified after Blob roundtrip.
+- Restore from JellyRoller backup yields login screen (not setup wizard) and expected data.
+- Tar sidecar remains intact and usable as fallback.
+
+### Risks & Notes
+- Coverage: JellyRoller/Jellyfin backup covers server config/users/db/metadata—not media files (media remains on Azure Files).
+- Consistency: Online backups rely on Jellyfin’s engine; schedule during low activity for best results.
+- Ephemeral storage: Copy archives to Blob promptly; `/data` is `EmptyDir`.
+- Dependency: If Jellyfin backup API fails, continue using the tar sidecar.
+
+### Phased Steps (Engineer Runbook)
+- Design
+  - Decide sidecar vs job (spike uses sidecar). Add `enableJellyRoller` flag in `infra/modules/containerapp.bicep`.
+- Build
+  - Create `Dockerfile.jellyroller`; include JellyRoller and AzCopy; push image to ACR/GHCR with immutable tag.
+- Configure
+  - Add `jellyroller-runner` container with env/secretRefs and mounts (`/data`, optional `/.config/jellyroller`). Set Jellyfin backup path to `/data/backups`.
+- Execute
+  - Deploy with `enableJellyRoller=true`. Observe runner logs; confirm first good backup, Blob upload, metadata, and retention.
+- Validate
+  - Perform a controlled restore from a JellyRoller backup; verify login (no setup wizard) and expected entities.
+- Rollback
+  - Disable `enableJellyRoller` or set `JELLYROLLER_ENABLED=false`; keep tar sidecar as primary. Clean up `jellyroller/` blobs if abandoning the spike.
