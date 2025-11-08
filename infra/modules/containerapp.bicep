@@ -30,6 +30,47 @@ resource jellyfinApp 'Microsoft.App/containerApps@2025-01-01' = {
       ]
     }
     template: {
+      initContainers: [
+        {
+          image: 'mcr.microsoft.com/azure-cli'
+          name: 'restore-db'
+          env: [
+            {
+              name: 'AZURE_STORAGE_ACCOUNT'
+              value: storageAccountName
+            }
+            {
+              name: 'AZURE_STORAGE_KEY'
+              secretRef: 'storage-account-key'
+            }
+            {
+              name: 'BACKUP_CONTAINER'
+              value: 'jellyfin-backups'
+            }
+            {
+              name: 'RESTORE_PATH'
+              value: '/data/data/jellyfin.db'
+            }
+          ]
+          resources: {
+            cpu: json('0.25')
+            memory: '0.5Gi'
+          }
+          volumeMounts: [
+            {
+              volumeName: 'data-volume'
+              mountPath: '/data'
+            }
+          ]
+          command: [
+            '/bin/bash'
+            '-c'
+          ]
+          args: [
+            'LATEST=$(az storage blob list --container-name $BACKUP_CONTAINER --account-name $AZURE_STORAGE_ACCOUNT --account-key $AZURE_STORAGE_KEY --auth-mode key --query "sort_by([?name!=\'\'], &properties.lastModified)[-1].name" -o tsv); if [ -n "$LATEST" ]; then echo "Restoring $LATEST..."; mkdir -p $(dirname $RESTORE_PATH); az storage blob download --container-name $BACKUP_CONTAINER --name "$LATEST" --file $RESTORE_PATH --account-name $AZURE_STORAGE_ACCOUNT --account-key $AZURE_STORAGE_KEY --auth-mode key --overwrite && echo "Restore complete."; else echo "No backups found; starting fresh."; fi'
+          ]
+        }
+      ]
       containers: [
         {
           image: 'jellyfin/jellyfin:latest'
@@ -109,7 +150,7 @@ resource jellyfinApp 'Microsoft.App/containerApps@2025-01-01' = {
         }
       ]
       scale: {
-        minReplicas: 1 // Keep running during setup
+        minReplicas: 0 // Allow scale-to-zero when idle
         maxReplicas: 1 // Single instance to minimize costs
         rules: [
           {
