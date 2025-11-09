@@ -21,11 +21,19 @@ resource storageAccount 'Microsoft.Storage/storageAccounts@2023-01-01' = {
   }
 }
 
-// File Share for Media only
+// File Shares for Jellyfin
 resource mediaFileShare 'Microsoft.Storage/storageAccounts/fileServices/shares@2023-01-01' = {
   name: '${storageAccount.name}/default/jellyfin-media'
   properties: {
-    shareQuota: 100 // 100GB for media - use full free tier allowance
+    shareQuota: 90 // 90GB for media 
+    enabledProtocols: 'SMB'
+  }
+}
+
+resource configFileShare 'Microsoft.Storage/storageAccounts/fileServices/shares@2023-01-01' = {
+  name: '${storageAccount.name}/default/jellyfin-config'
+  properties: {
+    shareQuota: 10 // 10GB for config
     enabledProtocols: 'SMB'
   }
 }

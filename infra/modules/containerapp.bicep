@@ -46,27 +46,15 @@ resource jellyfinApp 'Microsoft.App/containerApps@2025-01-01' = {
           env: [
             {
               name: 'JELLYFIN_DATA_DIR'
-              value: '/data'
+              value: '/config'
             }
             {
-              name: 'JELLYFIN_DB_TYPE'
-              value: 'SqlServer'
+              name: 'JELLYFIN_CONFIG_DIR'
+              value: '/config'
             }
             {
-              name: 'JELLYFIN_DB_SERVER'
-              value: sqlServerFqdn
-            }
-            {
-              name: 'JELLYFIN_DB_DATABASE'
-              value: sqlDatabaseName
-            }
-            {
-              name: 'JELLYFIN_DB_USER'
-              value: sqlAdminLogin
-            }
-            {
-              name: 'JELLYFIN_DB_PASSWORD'
-              secretRef: 'sql-admin-password'
+              name: 'SQL_CONNECTION_STRING'
+              value: 'Server=${sqlServerFqdn};Database=${sqlDatabaseName};User Id=${sqlAdminLogin};Password=${sqlAdminPassword};TrustServerCertificate=true;'
             }
           ]
           resources: {
@@ -77,6 +65,10 @@ resource jellyfinApp 'Microsoft.App/containerApps@2025-01-01' = {
             {
               volumeName: 'media-volume'
               mountPath: '/media'
+            }
+            {
+              volumeName: 'config-volume'
+              mountPath: '/config'
             }
             {
               volumeName: 'data-volume'
@@ -106,12 +98,21 @@ resource jellyfinApp 'Microsoft.App/containerApps@2025-01-01' = {
           storageName: 'media-storage'
         }
         {
+          name: 'config-volume'
+          storageType: 'AzureFile'
+          storageName: 'config-storage'
+        }
+        {
           name: 'data-volume'
           storageType: 'EmptyDir'
         }
       ]
     }
   }
+  dependsOn: [
+    mediaStorage
+    configStorage
+  ]
 }
 
 // Storage configurations for Azure Files
@@ -123,6 +124,19 @@ resource mediaStorage 'Microsoft.App/managedEnvironments/storages@2025-01-01' = 
       accountName: storageAccountName
       accountKey: storageAccount.listKeys().keys[0].value
       shareName: 'jellyfin-media'
+      accessMode: 'ReadWrite'
+    }
+  }
+}
+
+resource configStorage 'Microsoft.App/managedEnvironments/storages@2025-01-01' = {
+  parent: containerAppsEnvironment
+  name: 'config-storage'
+  properties: {
+    azureFile: {
+      accountName: storageAccountName
+      accountKey: storageAccount.listKeys().keys[0].value
+      shareName: 'jellyfin-config'
       accessMode: 'ReadWrite'
     }
   }
