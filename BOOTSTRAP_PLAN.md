@@ -8,8 +8,8 @@ Design and implement a reliable bootstrap system for JellyFin server when scalin
 ### The Problem
 - **Current Setup**: JellyFin deployed on Azure Container Apps with scale-to-zero capability
 - **Issue**: When container scales from 0→1, JellyFin presents setup wizard (fresh state)
-- **Root Cause**: SQLite database was ephemeral, though we now use Azure SQL Database for persistence
-- **Impact**: Manual intervention required after every cold start
+- **Root Cause**: JellyFin uses SQLite database stored in ephemeral container filesystem - all data lost on scale-down
+- **Impact**: Complete reconfiguration required after every cold start (users, settings, libraries, etc.)
 
 ### Key Discussion Points
 1. **Authentication Challenge**: Fresh JellyFin has no admin user to authenticate JellyRoller with
@@ -19,13 +19,13 @@ Design and implement a reliable bootstrap system for JellyFin server when scalin
 
 ### Available Assets
 - **JellyRoller CLI**: Docker image `swampyfox/jellyroller-runner` with extensive JellyFin management capabilities
-- **Current Infrastructure**: Azure Container Apps + Azure SQL Database + Azure Files
+- **Current Infrastructure**: Azure Container Apps + Azure Files (media storage only)
 - **Bootstrap Options**: Init containers, sidecar containers, or startup hooks
 
 ### Critical Unknowns (Why We Need Testing)
-- What exactly gets stored in SQL database vs file system?
-- Do JellyRoller backups include complete server state?
-- Can setup wizard be bypassed entirely?
+- What exactly gets stored in SQLite database vs configuration files?
+- Do JellyRoller backups include complete database + config state?
+- Can we mount SQLite database on persistent storage (Azure Files)?
 - Will init containers work reliably in Container Apps?
 
 ### Decision: Systematic Testing Approach
@@ -35,9 +35,9 @@ Rather than implementing blindly, we'll use HERO methodology to validate each as
 
 ### Infrastructure
 - **Platform**: Azure Container Apps with scale-to-zero
-- **Database**: Azure SQL Database (persistent)
+- **Database**: SQLite (ephemeral - stored in container filesystem)
 - **Storage**: Azure Files (persistent) 
-- **Problem**: JellyFin configuration is ephemeral, requiring manual setup wizard on each cold start
+- **Problem**: JellyFin database and configuration are ephemeral, requiring complete setup wizard on each cold start
 
 ### Available Tools
 - **JellyRoller CLI**: Available as Docker image `swampyfox/jellyroller-runner`
@@ -73,20 +73,22 @@ Rather than implementing blindly, we'll use HERO methodology to validate each as
 
 ---
 
-#### H1.2: Database vs File System State
-**Hypothesis**: JellyFin stores configuration in both SQL database (persistent) and file system (ephemeral), causing incomplete restoration.
+#### H1.2: SQLite Database vs Configuration Files
+**Hypothesis**: JellyFin stores data in both SQLite database and XML configuration files, both ephemeral in current setup.
 
 **Experiment**:
-1. Fresh JellyFin setup with SQL database
+1. Fresh JellyFin setup (complete setup wizard)
 2. Document what gets stored where:
-   - SQL database tables and data
-   - File system configuration files
-3. Scale to zero and examine what persists
-4. Scale back to one and document what's missing
+   - SQLite database location and contents
+   - XML configuration files
+   - Any other persistent state files
+3. Scale to zero and examine what's lost
+4. Scale back to one and document what causes setup wizard
 
 **Success Criteria**:
-- [ ] Clear mapping of persistent vs ephemeral data
-- [ ] Understanding of what causes setup wizard to appear
+- [ ] Clear mapping of SQLite vs config file data
+- [ ] Understanding of minimum files needed to bypass setup wizard
+- [ ] Identification of database file location
 
 **Test Script**: `tests/h1-2-state-mapping.ps1`
 
@@ -107,6 +109,27 @@ Rather than implementing blindly, we'll use HERO methodology to validate each as
 - [ ] No setup wizard displayed
 
 **Test Script**: `tests/h1-3-config-bypass.ps1`
+
+---
+
+#### H1.4: Persistent Storage for SQLite
+**Hypothesis**: JellyFin SQLite database can be mounted on Azure Files persistent storage to survive container restarts.
+
+**Experiment**:
+1. Complete JellyFin setup with database on Azure Files mount
+2. Create test data (users, settings, libraries)
+3. Scale to zero, then back to one
+4. Verify data persists and no setup wizard appears
+5. Test database performance on Azure Files vs local storage
+
+**Success Criteria**:
+- [ ] SQLite database successfully mounted on Azure Files
+- [ ] Data persists across container restarts
+- [ ] No setup wizard after restart
+- [ ] Acceptable database performance
+- [ ] No corruption or locking issues
+
+**Test Script**: `tests/h1-4-persistent-sqlite.ps1`
 
 ---
 
@@ -290,6 +313,7 @@ All test scripts will be created in `tests/` directory:
 - `tests/h1-1-backup-contents.ps1`
 - `tests/h1-2-state-mapping.ps1` 
 - `tests/h1-3-config-bypass.ps1`
+- `tests/h1-4-persistent-sqlite.ps1`
 - `tests/h2-1-server-setup.ps1`
 - `tests/h2-2-backup-first.ps1`
 - `tests/h2-3-init-container.ps1`
@@ -315,8 +339,8 @@ All test scripts will be created in `tests/` directory:
 
 ### Current Infrastructure Files
 - `infra/main.bicep`: Main infrastructure template
-- `infra/modules/containerapp.bicep`: Container Apps configuration
-- `infra/modules/database.bicep`: Azure SQL Database setup
+- `infra/modules/containerapp.bicep`: Container Apps configuration  
+- `infra/modules/storage.bicep`: Azure Files storage setup
 - `azure.yaml`: Azure Developer CLI configuration
 
 ## 🎯 Next Steps
@@ -345,8 +369,9 @@ When resuming this work:
 
 ### Testing Phase: ⏳ PENDING
 - [ ] H1.1: Backup contents analysis
-- [ ] H1.2: State mapping (SQL vs filesystem)
+- [ ] H1.2: State mapping (SQLite vs filesystem)
 - [ ] H1.3: Setup wizard bypass testing
+- [ ] H1.4: Persistent SQLite storage testing
 - [ ] H2.x: JellyRoller integration tests
 - [ ] H3.x: Production readiness validation
 
