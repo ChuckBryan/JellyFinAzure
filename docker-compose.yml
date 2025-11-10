@@ -1,0 +1,88 @@
+version: '3.8'
+
+services:
+  # Azure Storage Emulator (Azurite) - mimics Azure Files
+  azurite:
+    image: mcr.microsoft.com/azure-storage/azurite:latest
+    container_name: jellyfin-azurite
+    ports:
+      - "10000:10000"  # Blob service
+      - "10001:10001"  # Queue service  
+      - "10002:10002"  # Table service
+    volumes:
+      - azurite-data:/workspace
+    command: azurite --blobHost 0.0.0.0 --queueHost 0.0.0.0 --tableHost 0.0.0.0 --loose --skipApiVersionCheck
+    networks:
+      - jellyfin-network
+
+  # JellyFin server - main application
+  jellyfin:
+    image: jellyfin/jellyfin:latest
+    container_name: jellyfin-server
+    ports:
+      - "8096:8096"
+    volumes:
+      # Media files (simulates Azure Files media share)
+      - ./test-media:/media:ro
+      # Configuration and database (this is what we're testing persistence for)
+      - jellyfin-config:/config
+      # Cache directory
+      - jellyfin-cache:/cache
+    environment:
+      - JELLYFIN_DATA_DIR=/config
+      - JELLYFIN_CONFIG_DIR=/config
+      - JELLYFIN_LOG_DIR=/config/logs
+      - JELLYFIN_CACHE_DIR=/cache
+    depends_on:
+      - azurite
+    networks:
+      - jellyfin-network
+
+  # JellyRoller CLI container for testing bootstrap scenarios
+  jellyroller:
+    image: swampyfox/jellyroller-runner:latest
+    container_name: jellyfin-jellyroller
+    volumes:
+      # Mount bootstrap configuration files
+      - ./bootstrap-config:/bootstrap:ro
+      # Mount backup storage location
+      - ./test-backups:/backups
+      # Share config with jellyfin for file inspection
+      - jellyfin-config:/jellyfin-config:ro
+    environment:
+      - JELLYFIN_URL=http://jellyfin:8096
+    networks:
+      - jellyfin-network
+    profiles:
+      - testing  # Only start when explicitly requested
+
+  # Init container simulation for testing bootstrap process
+  jellyfin-bootstrap:
+    image: swampyfox/jellyroller-runner:latest
+    container_name: jellyfin-bootstrap
+    volumes:
+      - ./bootstrap-config:/bootstrap:ro
+      - ./test-backups:/backups
+      - jellyfin-config:/config
+    environment:
+      - JELLYFIN_URL=http://jellyfin:8096
+      - BOOTSTRAP_PATH=/bootstrap
+      - BACKUP_PATH=/backups
+    networks:
+      - jellyfin-network
+    profiles:
+      - bootstrap  # Only start when explicitly requested
+    command: ["/bin/sh", "-c", "echo 'Bootstrap container ready for testing'"]
+
+volumes:
+  # Persistent volumes for testing persistence scenarios
+  jellyfin-config:
+    driver: local
+  jellyfin-cache:
+    driver: local
+  azurite-data:
+    driver: local
+
+networks:
+  jellyfin-network:
+    driver: bridge
