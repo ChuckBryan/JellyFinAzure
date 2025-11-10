@@ -13,9 +13,6 @@ param environmentName string
 @description('Unique identifier for the deployment')
 param principalId string = ''
 
-@description('SQL Database administrator password')
-@secure()
-param sqlAdminPassword string
 
 // Generate unique suffix for resources
 var resourceToken = toLower(uniqueString(subscription().id, environmentName, location))
@@ -44,18 +41,6 @@ module storage 'modules/storage.bicep' = {
   }
 }
 
-// SQL Database
-module database 'modules/database.bicep' = {
-  name: 'database'
-  scope: rg
-  params: {
-    location: location
-    resourceToken: resourceToken
-    tags: tags
-    administratorPassword: sqlAdminPassword
-  }
-}
-
 // Container Apps Environment
 module containerAppsEnvironment 'modules/environment.bicep' = {
   name: 'container-apps-environment'
@@ -77,10 +62,6 @@ module jellyfinApp 'modules/containerapp.bicep' = {
     tags: tags
     containerAppsEnvironmentId: containerAppsEnvironment.outputs.environmentId
     storageAccountName: storage.outputs.storageAccountName
-    sqlServerFqdn: database.outputs.serverFqdn
-    sqlDatabaseName: database.outputs.databaseName
-    sqlAdminLogin: database.outputs.administratorLogin
-    sqlAdminPassword: sqlAdminPassword
   }
 }
 
@@ -101,5 +82,3 @@ output AZURE_RESOURCE_GROUP string = rg.name
 output JELLYFIN_ENDPOINT string = jellyfinApp.outputs.jellyfinUrl
 output STORAGE_ACCOUNT_NAME string = storage.outputs.storageAccountName
 output CONTAINER_APP_NAME string = jellyfinApp.outputs.containerAppName
-output SQL_SERVER_NAME string = database.outputs.serverName
-output SQL_DATABASE_NAME string = database.outputs.databaseName
